@@ -133,6 +133,38 @@ int main() {
         // Child process: userID process
         printf("Process for userID started.\n");
 
+        // Get user name
+        char user_name[256];
+        printf("Enter your name: ");
+        scanf("%s", user_name);
+        printf("Welcome, %s!\n", user_name);
+
+        // Get shopping list from the user
+        char items[256][256];
+        int quantities[256];
+        int num_items = 0;
+        double budget;
+
+        while (1) {
+            printf("Enter the name of the item (or type 'done' to finish): ");
+            scanf("%s", items[num_items]);
+            if (strcmp(items[num_items], "done") == 0) {
+                break;
+            }
+            printf("Enter the quantity for %s: ", items[num_items]);
+            scanf("%d", &quantities[num_items]);
+            num_items++;
+        }
+
+        printf("Enter your budget: ");
+        scanf("%lf", &budget);
+
+        printf("Your shopping list:\n");
+        for (int i = 0; i < num_items; i++) {
+            printf("Item: %s, Quantity: %d\n", items[i], quantities[i]);
+        }
+        printf("Budget: %.2lf\n", budget);
+
         // Create processes for each store
         for (int i = 0; i < num_stores; i++) {
             pid_t pid = fork();
