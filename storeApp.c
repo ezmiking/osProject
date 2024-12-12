@@ -135,9 +135,9 @@ int main() {
 
         // Get user name
         char user_name[256];
-        printf("Enter your name: ");
+        printf("Username: ");
         scanf("%s", user_name);
-        printf("Welcome, %s!\n", user_name);
+        printf("\nOrderList0:\n");
 
         // Get shopping list from the user
         char items[256][256];
@@ -151,19 +151,32 @@ int main() {
             if (strcmp(items[num_items], "done") == 0) {
                 break;
             }
-            printf("Enter the quantity for %s: ", items[num_items]);
+            printf("%s ", items[num_items]);
             scanf("%d", &quantities[num_items]);
+            printf("\n");
             num_items++;
         }
 
-        printf("Enter your budget: ");
-        scanf("%lf", &budget);
+        printf("Price threshold: ");
+        char budget_input[256];
+        scanf("%s", budget_input);
 
-        printf("Your shopping list:\n");
-        for (int i = 0; i < num_items; i++) {
-            printf("Item: %s, Quantity: %d\n", items[i], quantities[i]);
+        if (strlen(budget_input) == 0 || strcmp(budget_input, "none") == 0) {
+            printf("No price threshold defined.\n");
+            budget = -1;
+        } else {
+            budget = atof(budget_input);
         }
-        printf("Budget: %.2lf\n", budget);
+
+        printf("\nUsername: %s\nOrderList0:\n", user_name);
+        for (int i = 0; i < num_items; i++) {
+            printf("%s %d\n", items[i], quantities[i]);
+        }
+        if (budget > 0) {
+            printf("Price threshold: %.2lf\n", budget);
+        } else {
+            printf("Price threshold: none\n");
+        }
 
         // Create processes for each store
         for (int i = 0; i < num_stores; i++) {
