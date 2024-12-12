@@ -1,4 +1,4 @@
-// A C program to create a separate process for each store and process categories within them.
+// A C program to create a separate process for each store, process categories within them, and create threads for each product.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +7,28 @@
 #include <sys/wait.h>
 #include <dirent.h>
 #include <string.h>
+#include <pthread.h>
+
+// Thread function to handle a product
+void *handle_product(void *file_path) {
+    char *path = (char *)file_path;
+    printf("Thread: Processing file %s\n", path);
+
+    FILE *file = fopen(path, "r");
+    if (file == NULL) {
+        perror("Failed to open file");
+        pthread_exit(NULL);
+    }
+
+    char line[256];
+    while (fgets(line, sizeof(line), file) != NULL) {
+        printf("%s", line);
+    }
+
+    fclose(file);
+    printf("Thread: Completed processing file %s\n", path);
+    pthread_exit(NULL);
+}
 
 // Function to handle operations for a category
 void handle_category(const char *category_path, const char *category_name) {
@@ -19,6 +41,9 @@ void handle_category(const char *category_path, const char *category_name) {
     }
 
     struct dirent *entry;
+    pthread_t threads[256];
+    int thread_count = 0;
+
     while ((entry = readdir(dir)) != NULL) {
         // Skip '.' and '..'
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
@@ -26,24 +51,22 @@ void handle_category(const char *category_path, const char *category_name) {
         }
 
         // Construct the file path
-        char file_path[256];
-        snprintf(file_path, sizeof(file_path), "%s/%s", category_path, entry->d_name);
+        char *file_path = malloc(256);
+        snprintf(file_path, 256, "%s/%s", category_path, entry->d_name);
 
-        // Open the file and read its contents
-        FILE *file = fopen(file_path, "r");
-        if (file == NULL) {
-            perror("Failed to open file");
+        // Create a thread for each product file
+        if (pthread_create(&threads[thread_count], NULL, handle_product, file_path) != 0) {
+            perror("Failed to create thread");
+            free(file_path);
             continue;
         }
 
-        printf("Processing file: %s\n", file_path);
+        thread_count++;
+    }
 
-        char line[256];
-        while (fgets(line, sizeof(line), file) != NULL) {
-            printf("%s", line); // Print each line (or process as needed)
-        }
-
-        fclose(file);
+    // Wait for all threads to complete
+    for (int i = 0; i < thread_count; i++) {
+        pthread_join(threads[i], NULL);
     }
 
     closedir(dir);
