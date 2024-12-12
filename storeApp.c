@@ -1,4 +1,4 @@
-// A C program to create a separate process for each store, process categories within them, and create threads for each product.
+// A C program to create a separate process for userID, each store, process categories within them, and create threads for each product.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -126,31 +126,48 @@ int main() {
     const char *stores[] = {"Store1", "Store2", "Store3"};
     int num_stores = sizeof(stores) / sizeof(stores[0]);
 
-    // Create processes for each store
-    for (int i = 0; i < num_stores; i++) {
-        pid_t pid = fork();
+    // Create a process for userID
+    pid_t user_pid = fork();
 
-        if (pid == 0) {
-            // Child process: construct the store path and handle the store
-            char store_path[256];
-            snprintf(store_path, sizeof(store_path), "%s/%s", dataset_path, stores[i]);
-            handle_store(store_path, stores[i]);
-            exit(0); // Exit child process after completing work
-        } else if (pid > 0) {
-            // Parent process: continue to create other processes
-            printf("Parent: Created process for store %s.\n", stores[i]);
-        } else {
-            // Fork failed
-            perror("Fork failed");
-            exit(1);
+    if (user_pid == 0) {
+        // Child process: userID process
+        printf("Process for userID started.\n");
+
+        // Create processes for each store
+        for (int i = 0; i < num_stores; i++) {
+            pid_t pid = fork();
+
+            if (pid == 0) {
+                // Child process: construct the store path and handle the store
+                char store_path[256];
+                snprintf(store_path, sizeof(store_path), "%s/%s", dataset_path, stores[i]);
+                handle_store(store_path, stores[i]);
+                exit(0); // Exit child process after completing work
+            } else if (pid > 0) {
+                // Parent process: continue to create other processes
+                printf("UserID Process: Created process for store %s.\n", stores[i]);
+            } else {
+                // Fork failed
+                perror("Fork failed");
+                exit(1);
+            }
         }
-    }
 
-    // Parent process waits for all store processes to complete
-    for (int i = 0; i < num_stores; i++) {
+        // Wait for all store processes to complete
+        for (int i = 0; i < num_stores; i++) {
+            wait(NULL);
+        }
+
+        printf("Process for userID completed.\n");
+        exit(0);
+    } else if (user_pid > 0) {
+        // Parent process: wait for userID process to complete
         wait(NULL);
+    } else {
+        perror("Fork failed for userID process");
+        exit(1);
     }
 
-    printf("All store processes completed.\n");
+    printf("All processes completed successfully.\n");
     return 0;
 }
