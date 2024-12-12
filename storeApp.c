@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <pthread.h>
+#include <sys/syscall.h>
 
 // Shared user input data
 char items[256][256];
@@ -30,6 +31,7 @@ void *handle_product(void *file_path) {
     while (fgets(line, sizeof(line), file) != NULL) {
         for (int i = 0; i < num_items; i++) {
             if (strstr(line, items[i]) != NULL) {
+                printf("PID %d create thread for Orders TID:%ld\n", getpid(), syscall(SYS_gettid));
                 printf("Thread: Found '%s' in file %s\n", items[i], path);
                 found = 1;
             }
@@ -47,7 +49,7 @@ void *handle_product(void *file_path) {
 
 // Function to handle operations for a category
 void handle_category(const char *category_path, const char *category_name) {
-    printf("Process for category %s started.\n", category_name);
+    printf("PID %d create child for %s\n", getpid(), category_name);
 
     DIR *dir = opendir(category_path);
     if (dir == NULL) {
@@ -85,12 +87,11 @@ void handle_category(const char *category_path, const char *category_name) {
     }
 
     closedir(dir);
-    printf("Process for category %s completed.\n", category_name);
 }
 
 // Function to handle operations for a store
 void handle_store(const char *store_path, const char *store_name) {
-    printf("Process for store %s started.\n", store_name);
+    printf("PID %d create child for %s\n", getpid(), store_name);
 
     DIR *dir = opendir(store_path);
     if (dir == NULL) {
@@ -99,7 +100,6 @@ void handle_store(const char *store_path, const char *store_name) {
     }
 
     struct dirent *entry;
-    int relevant_process = 0;
     while ((entry = readdir(dir)) != NULL) {
         // Skip '.' and '..'
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
@@ -119,7 +119,7 @@ void handle_store(const char *store_path, const char *store_name) {
             exit(0); // Exit child process after completing work
         } else if (pid > 0) {
             // Parent process: continue to process other categories
-            relevant_process = 1; // Mark process as relevant since child processes handle categories
+            printf("PID %d create child for %s PID:%d\n", getpid(), entry->d_name, pid);
         } else {
             // Fork failed
             perror("Fork failed");
@@ -131,9 +131,6 @@ void handle_store(const char *store_path, const char *store_name) {
     while (wait(NULL) > 0);
 
     closedir(dir);
-    if (relevant_process) {
-        printf("Process for store %s completed.\n", store_name);
-    }
 }
 
 int main() {
@@ -149,7 +146,7 @@ int main() {
 
     if (user_pid == 0) {
         // Child process: userID process
-        printf("Process for userID started.\n");
+        printf("USER1 create PID: %d\n", getpid());
 
         // Get user name
         char user_name[256];
@@ -194,7 +191,7 @@ int main() {
                 exit(0); // Exit child process after completing work
             } else if (pid > 0) {
                 // Parent process: continue to create other processes
-                printf("UserID Process: Created process for store %s.\n", stores[i]);
+                printf("PID %d create child for %s PID:%d\n", getpid(), stores[i], pid);
             } else {
                 // Fork failed
                 perror("Fork failed");
