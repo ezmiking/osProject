@@ -9,24 +9,39 @@
 #include <string.h>
 #include <pthread.h>
 
+// Shared user input data
+char items[256][256];
+int quantities[256];
+int num_items = 0;
+
 // Thread function to handle a product
 void *handle_product(void *file_path) {
     char *path = (char *)file_path;
-    printf("Thread: Processing file %s\n", path);
 
     FILE *file = fopen(path, "r");
     if (file == NULL) {
-        perror("Failed to open file");
         pthread_exit(NULL);
     }
 
     char line[256];
+    int found = 0;
+
+    // Check if any item matches
     while (fgets(line, sizeof(line), file) != NULL) {
-        printf("%s", line);
+        for (int i = 0; i < num_items; i++) {
+            if (strstr(line, items[i]) != NULL) {
+                printf("Thread: Found '%s' in file %s\n", items[i], path);
+                found = 1;
+            }
+        }
     }
 
     fclose(file);
-    printf("Thread: Completed processing file %s\n", path);
+
+    if (!found) {
+        pthread_exit(NULL); // Do not print threads that didn't find anything
+    }
+
     pthread_exit(NULL);
 }
 
@@ -84,6 +99,7 @@ void handle_store(const char *store_path, const char *store_name) {
     }
 
     struct dirent *entry;
+    int relevant_process = 0;
     while ((entry = readdir(dir)) != NULL) {
         // Skip '.' and '..'
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
@@ -103,7 +119,7 @@ void handle_store(const char *store_path, const char *store_name) {
             exit(0); // Exit child process after completing work
         } else if (pid > 0) {
             // Parent process: continue to process other categories
-            printf("Parent: Created process for category %s in store %s.\n", entry->d_name, store_name);
+            relevant_process = 1; // Mark process as relevant since child processes handle categories
         } else {
             // Fork failed
             perror("Fork failed");
@@ -115,7 +131,9 @@ void handle_store(const char *store_path, const char *store_name) {
     while (wait(NULL) > 0);
 
     closedir(dir);
-    printf("Process for store %s completed.\n", store_name);
+    if (relevant_process) {
+        printf("Process for store %s completed.\n", store_name);
+    }
 }
 
 int main() {
@@ -140,42 +158,28 @@ int main() {
         printf("\nOrderList0:\n");
 
         // Get shopping list from the user
-        char items[256][256];
-        int quantities[256];
-        int num_items = 0;
-        double budget;
-
+        num_items = 0;
         while (1) {
-            printf("Enter the name of the item (or type 'done' to finish): ");
+            printf("Enter the name of item %d: ", num_items + 1);
             scanf("%s", items[num_items]);
             if (strcmp(items[num_items], "done") == 0) {
                 break;
             }
-            printf("%s ", items[num_items]);
+            printf("Enter the quantity for %s: ", items[num_items]);
             scanf("%d", &quantities[num_items]);
-            printf("\n");
             num_items++;
         }
 
+        // Clear input buffer
+        while (getchar() != '\n');
+
         printf("Price threshold: ");
         char budget_input[256];
-        scanf("%s", budget_input);
-
-        if (strlen(budget_input) == 0 || strcmp(budget_input, "none") == 0) {
-            printf("No price threshold defined.\n");
-            budget = -1;
-        } else {
-            budget = atof(budget_input);
-        }
+        fgets(budget_input, sizeof(budget_input), stdin);
 
         printf("\nUsername: %s\nOrderList0:\n", user_name);
         for (int i = 0; i < num_items; i++) {
             printf("%s %d\n", items[i], quantities[i]);
-        }
-        if (budget > 0) {
-            printf("Price threshold: %.2lf\n", budget);
-        } else {
-            printf("Price threshold: none\n");
         }
 
         // Create processes for each store
