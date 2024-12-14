@@ -21,8 +21,11 @@ void *handle_product(void *file_path) {
 
     FILE *file = fopen(path, "r");
     if (file == NULL) {
+        printf("PID %d create thread TID:%ld for file %s - File not found\n", getpid(), syscall(SYS_gettid), path);
         pthread_exit(NULL);
     }
+
+    printf("PID %d create thread TID:%ld for file %s\n", getpid(), syscall(SYS_gettid), path);
 
     char line[256];
     int found = 0;
@@ -31,7 +34,6 @@ void *handle_product(void *file_path) {
     while (fgets(line, sizeof(line), file) != NULL) {
         for (int i = 0; i < num_items; i++) {
             if (strstr(line, items[i]) != NULL) {
-                printf("PID %d create thread for Orders TID:%ld\n", getpid(), syscall(SYS_gettid));
                 printf("Thread: Found '%s' in file %s\n", items[i], path);
                 found = 1;
             }
@@ -40,16 +42,12 @@ void *handle_product(void *file_path) {
 
     fclose(file);
 
-    if (!found) {
-        pthread_exit(NULL); // Do not print threads that didn't find anything
-    }
-
     pthread_exit(NULL);
 }
 
 // Function to handle operations for a category
 void handle_category(const char *category_path, const char *category_name) {
-    printf("PID %d create child for %s\n", getpid(), category_name);
+    printf("PID %d create child for category %s\n", getpid(), category_name);
 
     DIR *dir = opendir(category_path);
     if (dir == NULL) {
@@ -91,7 +89,7 @@ void handle_category(const char *category_path, const char *category_name) {
 
 // Function to handle operations for a store
 void handle_store(const char *store_path, const char *store_name) {
-    printf("PID %d create child for %s\n", getpid(), store_name);
+    printf("PID %d create child for store %s\n", getpid(), store_name);
 
     DIR *dir = opendir(store_path);
     if (dir == NULL) {
@@ -119,7 +117,7 @@ void handle_store(const char *store_path, const char *store_name) {
             exit(0); // Exit child process after completing work
         } else if (pid > 0) {
             // Parent process: continue to process other categories
-            printf("PID %d create child for %s PID:%d\n", getpid(), entry->d_name, pid);
+            printf("PID %d create child for category %s PID:%d\n", getpid(), entry->d_name, pid);
         } else {
             // Fork failed
             perror("Fork failed");
@@ -191,7 +189,7 @@ int main() {
                 exit(0); // Exit child process after completing work
             } else if (pid > 0) {
                 // Parent process: continue to create other processes
-                printf("PID %d create child for %s PID:%d\n", getpid(), stores[i], pid);
+                printf("PID %d create child for store %s PID:%d\n", getpid(), stores[i], pid);
             } else {
                 // Fork failed
                 perror("Fork failed");
