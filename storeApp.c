@@ -20,6 +20,7 @@ int num_items = 0;
 // Bag shop for each store
 pthread_mutex_t cart_lock = PTHREAD_MUTEX_INITIALIZER;
 typedef struct {
+    float total_price;
     int check_in_out;
     float value;
     char name[256][256];
@@ -58,36 +59,52 @@ void *handle_product(void *args) {
         int temp_entity = -1;
 
         if (sscanf(line, " Name: %255[^\n]", temp_name) == 1) {
-        for (int i = 0; i < num_items; i++) {
-            if (strcmp(temp_name, items[i]) == 0) {
-                while (fgets(line, sizeof(line), file) != NULL) {
-                    if (sscanf(line, " Price: %f", &temp_price) == 1) continue;
-                    if (sscanf(line, " Score: %f", &temp_score) == 1) continue;
-                    if (sscanf(line, " Entity: %d", &temp_entity) == 1) break;
-                }
+            for (int i = 0; i < num_items; i++) {
+                if (strcmp(temp_name, items[i]) == 0) {
+                    while (fgets(line, sizeof(line), file) != NULL) {
+                        if (sscanf(line, " Price: %f", &temp_price) == 1) continue;
+                        if (sscanf(line, " Score: %f", &temp_score) == 1) continue;
+                        if (sscanf(line, " Entity: %d", &temp_entity) == 1) break;
+                    }
 
-                if (temp_price > 0 && temp_score > 0 && temp_entity > 0) {
-                    pthread_mutex_lock(&cart_lock);
-                    strcpy(store_cart->name[store_cart->name_count], temp_name);
-                    store_cart->price[store_cart->name_count] = temp_price;
-                    store_cart->score[store_cart->name_count] = temp_score;
-                    store_cart->entity[store_cart->name_count] = temp_entity;
-                    store_cart->value += temp_price * temp_score;
-                    store_cart->name_count++;
-                    pthread_mutex_unlock(&cart_lock);
+                    if (temp_price > 0 && temp_score > 0 && temp_entity > 0) {
+                        pthread_mutex_lock(&cart_lock);
+                        strcpy(store_cart->name[store_cart->name_count], temp_name);
+                        store_cart->price[store_cart->name_count] = temp_price;
+                        store_cart->score[store_cart->name_count] = temp_score;
+                        store_cart->entity[store_cart->name_count] = temp_entity;
+                        store_cart->value += temp_price * temp_score;
 
-                    printf("Thread TID:%ld found product: %s, Price: %.2f, Score: %.2f, Entity: %d, Path: %s\n",
-                           syscall(SYS_gettid), temp_name, temp_price, temp_score, temp_entity, path);
+                        // Check inventory and calculate total_price
+                        for (int j = 0; j < num_items; j++) {
+                            if (strcmp(items[j], temp_name) == 0) {
+                                if (temp_entity >= quantities[j]) {
+                                    store_cart->total_price += quantities[j] * temp_price;
+                                } else {
+                                    store_cart->total_price += temp_entity * temp_price;
+                                    store_cart->check_in_out = 0; // Insufficient inventory
+                                    printf("Store does not have enough quantity for product %s. Requested: %d, Available: %d\n",
+                                           temp_name, quantities[j], temp_entity);
+                                }
+                                break;
+                            }
+                        }
+
+                        store_cart->name_count++;
+                        pthread_mutex_unlock(&cart_lock);
+
+                        printf("Thread TID:%ld found product: %s, Price: %.2f, Score: %.2f, Entity: %d, Path: %s\n",
+                               syscall(SYS_gettid), temp_name, temp_price, temp_score, temp_entity, path);
+                    }
+                    break;
                 }
-                break;
             }
         }
     }
-}
 
-fclose(file);
-free(thread_args);
-pthread_exit(NULL);
+    fclose(file);
+    free(thread_args);
+    pthread_exit(NULL);
 }
 
 // Function to handle operations for a category
@@ -136,7 +153,7 @@ void handle_category(const char *category_path, const char *category_name, cart_
 }
 
 // Function to handle operations for a store
-void handle_store(const char *store_path, const char *store_name) {
+void handle_store(const char *store_path, const char *store_name, const char *budget_input) {
     shm_id = shmget(IPC_PRIVATE, sizeof(cart_shop), IPC_CREAT | 0666);
     if (shm_id < 0) {
         perror("Failed to create shared memory");
@@ -183,15 +200,22 @@ void handle_store(const char *store_path, const char *store_name) {
 
     closedir(dir);
 
-    printf("Summary of cart for store %s:", store_name);
-    printf("Total Value: %.2f", store_cart->value);
-    if (store_cart->name_count == 0) {
-        printf("No items were added to the cart for store %s.\n", store_name);
-    }
+    printf("\nSummary of cart for store %s:\n", store_name);
     for (int i = 0; i < store_cart->name_count; i++) {
         printf("Product: %s, Price: %.2f, Score: %.2f, Entity: %d\n",
                store_cart->name[i], store_cart->price[i], store_cart->score[i], store_cart->entity[i]);
     }
+    printf("Total Value: %.2f\n", store_cart->value);
+    printf("Total Price for requested items: %.2f\n", store_cart->total_price);
+
+    // Check if total_price exceeds threshold
+    if (store_cart->total_price > atof(budget_input)) {
+        store_cart->check_in_out = 0;
+        printf("Store %s exceeds the price threshold. Setting check_in_out to 0.\n", store_name);
+    }
+
+    // Print the check_in_out status for the cart_shop
+    printf("Check-in-out status: %d\n", store_cart->check_in_out);
 
     if (shmdt(store_cart) == -1) {
         perror("Failed to detach shared memory");
@@ -200,6 +224,7 @@ void handle_store(const char *store_path, const char *store_name) {
         perror("Failed to remove shared memory");
     }
 }
+
 
 int main() {
     const char *dataset_path = "./Dataset";
@@ -246,7 +271,7 @@ int main() {
             if (pid == 0) {
                 char store_path[256];
                 snprintf(store_path, sizeof(store_path), "%s/%s", dataset_path, stores[i]);
-                handle_store(store_path, stores[i]);
+                handle_store(store_path, stores[i], budget_input);
                 exit(0);
             } else if (pid > 0) {
                 printf("PID %d create child for store %s PID:%d\n", getpid(), stores[i], pid);
