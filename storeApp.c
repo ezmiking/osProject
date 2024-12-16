@@ -20,6 +20,8 @@ int num_items = 0;
 // Bag shop for each store
 pthread_mutex_t cart_lock = PTHREAD_MUTEX_INITIALIZER;
 typedef struct {
+    int check_in_out;
+    float value;
     char name[256][256];
     float price[100];
     float score[100];
@@ -70,6 +72,7 @@ void *handle_product(void *args) {
                     store_cart->price[store_cart->name_count] = temp_price;
                     store_cart->score[store_cart->name_count] = temp_score;
                     store_cart->entity[store_cart->name_count] = temp_entity;
+                    store_cart->value += temp_price * temp_score;
                     store_cart->name_count++;
                     pthread_mutex_unlock(&cart_lock);
 
@@ -145,6 +148,7 @@ void handle_store(const char *store_path, const char *store_name) {
         exit(1);
     }
     memset(store_cart, 0, sizeof(cart_shop));
+    store_cart->check_in_out = 1;
     printf("PID %d create child for store %s\n", getpid(), store_name);
 
     DIR *dir = opendir(store_path);
@@ -179,7 +183,8 @@ void handle_store(const char *store_path, const char *store_name) {
 
     closedir(dir);
 
-    printf("\nSummary of cart for store %s:\n", store_name);
+    printf("Summary of cart for store %s:", store_name);
+    printf("Total Value: %.2f", store_cart->value);
     if (store_cart->name_count == 0) {
         printf("No items were added to the cart for store %s.\n", store_name);
     }
