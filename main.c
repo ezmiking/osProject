@@ -1,9 +1,5 @@
 #include <gtk/gtk.h>
 
-//ارانذنتذئنمدنمد
-//ندذتذناذنذدتذنت
- /jbkbiiib
-
 // تابع برای مدیریت کلیک روی دکمه ثبت سفارش
 void on_submit_clicked(GtkButton *button, gpointer user_data) {
     GtkWidget **widgets = (GtkWidget **)user_data;
