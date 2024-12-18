@@ -300,7 +300,7 @@ bool find_and_update_product_score(const char *store_path, const char *product_n
     closedir(dir);
     return updated;
 }
-
+//entakhbe behtarin sabad
 void *select_best_cart(void *args) {
     cart_shop *store_carts = (cart_shop *)args;
     float max_value = -1;
@@ -324,7 +324,7 @@ void *select_best_cart(void *args) {
 
     return (void*)(long)best_cart_index;
 }
-
+//nakhe final
 void *final_thread_func(void *args) {
     struct {
         cart_shop *store_carts;
@@ -371,7 +371,7 @@ void *final_thread_func(void *args) {
     free(final_args);
     pthread_exit(NULL);
 }
-
+//nakhe score
 void *score_thread_func(void *args) {
     struct {
         cart_shop *store_carts;
@@ -411,7 +411,7 @@ void *score_thread_func(void *args) {
     free(score_args);
     pthread_exit(NULL);
 }
-
+//nakh bara mahsoolat
 struct product_thread_args {
     char *file_path;
     cart_shop *store_cart;
@@ -555,7 +555,7 @@ void handle_category(const char *category_path, cart_shop *store_cart) {
 }
 
 void handle_store(const char *store_path, const char *store_name, const char *budget_input, cart_shop *store_cart) {
-    // create .log for each store
+    // sakhte .log baraye har store
     char store_log_path[512];
     snprintf(store_log_path, sizeof(store_log_path), "%s/%d_%s.log", store_path, global_user_pid, global_user_name);
     FILE *store_logf = fopen(store_log_path, "w");
@@ -613,7 +613,7 @@ void handle_store(const char *store_path, const char *store_name, const char *bu
 
     printf("Check-in-out status: %d\n", store_cart->check_in_out);
 }
-
+//main***************************************************************
 int main() {
     printf("Username: ");
     scanf("%s", global_user_name);
@@ -684,14 +684,14 @@ int main() {
     }
 
     while (wait(NULL) > 0);
-
+//value kh
     pthread_t val_thread;
     void *best_cart_index_ptr;
     pthread_create(&val_thread, NULL, select_best_cart, shared_store_carts);
     pthread_join(val_thread, &best_cart_index_ptr);
 
     int best_cart_index = (int)(long)best_cart_index_ptr;
-
+//ijade naakhe final
     struct {
         cart_shop *store_carts;
         int best_cart_index;
@@ -704,7 +704,7 @@ int main() {
     pthread_t final_thread;
     pthread_create(&final_thread, NULL, final_thread_func, final_args);
     pthread_join(final_thread, NULL);
-
+//ijade nakhe scoree
     struct {
         cart_shop *store_carts;
         int best_cart_index;
@@ -720,7 +720,7 @@ int main() {
         printf("Final status of store %s: check_in_out = %d, value = %.2f\n",
                stores[i], shared_store_carts[i].check_in_out, shared_store_carts[i].value);
     }
-
+//chapppppppppppppp
     if (shmdt(shared_store_carts) == -1) {
         perror("Failed to detach shared memory in main");
     }
