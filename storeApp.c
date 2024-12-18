@@ -1,3 +1,4 @@
+// A C program to create a separate process for userID, each store, process categories within them, and create threads for each product.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +47,11 @@ void *select_best_cart(void *args) {
     int best_cart_index = -1;
 
     printf("DEBUG: Starting value_thread...\n");
+    printf("DEBUG: Checking carts before selecting best:\n");
+    for (int i = 0; i < num_items; i++) {
+        printf("DEBUG: Cart %d -> Value: %.2f, Check_in_out: %d\n", i, store_carts[i].value, store_carts[i].check_in_out);
+    }
+
     pthread_mutex_lock(&cart_lock);
     for (int i = 0; i < num_items; i++) {
         if (store_carts[i].check_in_out == 1 && store_carts[i].value > max_value) {
@@ -97,7 +103,6 @@ void *handle_product(void *args) {
 
         if (sscanf(line, " Name: %255[^\n]", temp_name) == 1) {
             for (int i = 0; i < num_items; i++) {
-//                printf("DEBUG: Cart %d has value: %.2f and check_in_out: %d\n", i, store_carts[i].value, store_carts[i].check_in_out);
                 if (strcmp(temp_name, items[i]) == 0) {
                     while (fgets(line, sizeof(line), file) != NULL) {
                         if (sscanf(line, " Price: %f", &temp_price) == 1) continue;
@@ -133,6 +138,7 @@ void *handle_product(void *args) {
 
                         printf("Thread TID:%ld found product: %s, Price: %.2f, Score: %.2f, Entity: %d, Path: %s\n",
                                syscall(SYS_gettid), temp_name, temp_price, temp_score, temp_entity, path);
+                        printf("DEBUG: Completed product -> Cart Value: %.2f, Total Price: %.2f\n", store_cart->value, store_cart->total_price);
                     }
                     break;
                 }
@@ -181,7 +187,7 @@ void handle_category(const char *category_path, const char *category_name, cart_
 
         pthread_mutex_lock(&thread_count_lock);
         total_product_threads++;
-//        printf("DEBUG: Total product threads created so far: %d\n", total_product_threads);
+        printf("DEBUG: Total product threads created so far: %d\n", total_product_threads);
         pthread_mutex_unlock(&thread_count_lock);
 
         if (pthread_create(&threads[thread_count], NULL, handle_product, thread_args) != 0) {
@@ -335,13 +341,13 @@ int main() {
         }
 
         while (product_threads_done < total_product_threads) {
+            printf("DEBUG: Waiting for threads -> Done: %d, Total: %d\n", product_threads_done, total_product_threads);
             sleep(1);
         }
 
-//        printf("DEBUG: Creating value_thread...\n");
+        printf("DEBUG: All product threads completed. Starting value_thread...\n");
         pthread_create(&value_thread, NULL, select_best_cart, store_carts);
         pthread_join(value_thread, NULL);
-//        printf("DEBUG: value_thread has finished.\n");
 
         for (int i = 0; i < num_stores; i++) {
             wait(NULL);
