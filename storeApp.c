@@ -1,5 +1,3 @@
-// A C program to create a separate process for userID, each store, process categories within them, and create threads for each product.
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -11,6 +9,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/syscall.h>
+#include <stdbool.h>
 
 // Shared user input data
 char items[256][256];
@@ -31,6 +30,37 @@ typedef struct {
 } cart_shop;
 
 int shm_id; // Global shared memory identifier
+pthread_t value_thread;
+bool value_thread_done = false;
+pthread_cond_t value_cond = PTHREAD_COND_INITIALIZER;
+
+// Thread function to handle cart selection
+void *select_best_cart(void *args) {
+    cart_shop *store_carts = args;
+    float max_value = -1;
+    int best_cart_index = -1;
+
+    pthread_mutex_lock(&cart_lock);
+    for (int i = 0; i < num_items; i++) {
+        if (store_carts[i].check_in_out == 1 && store_carts[i].value > max_value) {
+            max_value = store_carts[i].value;
+            best_cart_index = i;
+        }
+    }
+
+    for (int i = 0; i < num_items; i++) {
+        if (i != best_cart_index) {
+            store_carts[i].check_in_out = 0;
+        }
+    }
+
+    printf("Best cart selected with value: %.2f\n", max_value);
+    value_thread_done = true;
+    pthread_cond_broadcast(&value_cond);
+    pthread_mutex_unlock(&cart_lock);
+
+    pthread_exit(NULL);
+}
 
 // Thread function to handle a product
 void *handle_product(void *args) {
@@ -104,6 +134,13 @@ void *handle_product(void *args) {
 
     fclose(file);
     free(thread_args);
+
+    pthread_mutex_lock(&cart_lock);
+    while (!value_thread_done) {
+        pthread_cond_wait(&value_cond, &cart_lock);
+    }
+    pthread_mutex_unlock(&cart_lock);
+
     pthread_exit(NULL);
 }
 
@@ -226,6 +263,7 @@ void handle_store(const char *store_path, const char *store_name, const char *bu
 }
 
 
+// Updated main function
 int main() {
     const char *dataset_path = "./Dataset";
 
@@ -259,11 +297,17 @@ int main() {
         printf("Price threshold: ");
         char budget_input[256];
         fgets(budget_input, sizeof(budget_input), stdin);
+        budget_input[strcspn(budget_input, "\n")] = '\0';
 
         printf("\nUsername: %s\nOrderList0:\n", user_name);
         for (int i = 0; i < num_items; i++) {
             printf("%s %d\n", items[i], quantities[i]);
         }
+
+        cart_shop store_carts[num_stores];
+        memset(store_carts, 0, sizeof(store_carts));
+
+        pthread_create(&value_thread, NULL, select_best_cart, store_carts);
 
         for (int i = 0; i < num_stores; i++) {
             pid_t pid = fork();
@@ -285,6 +329,7 @@ int main() {
             wait(NULL);
         }
 
+        pthread_join(value_thread, NULL);
         printf("Process for userID completed.\n");
         exit(0);
     } else if (user_pid > 0) {
