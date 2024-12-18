@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -35,6 +36,7 @@ pthread_t value_thread;
 bool value_thread_done = false;
 
 int product_threads_done = 0; // Counter for product threads
+int total_product_threads = 0; // Total actual threads created
 pthread_mutex_t thread_count_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Thread function to handle cart selection
@@ -67,7 +69,6 @@ void *select_best_cart(void *args) {
     pthread_exit(NULL);
 }
 
-
 // Thread function to handle a product
 void *handle_product(void *args) {
     struct {
@@ -96,6 +97,7 @@ void *handle_product(void *args) {
 
         if (sscanf(line, " Name: %255[^\n]", temp_name) == 1) {
             for (int i = 0; i < num_items; i++) {
+//                printf("DEBUG: Cart %d has value: %.2f and check_in_out: %d\n", i, store_carts[i].value, store_carts[i].check_in_out);
                 if (strcmp(temp_name, items[i]) == 0) {
                     while (fgets(line, sizeof(line), file) != NULL) {
                         if (sscanf(line, " Price: %f", &temp_price) == 1) continue;
@@ -148,7 +150,7 @@ void *handle_product(void *args) {
     pthread_exit(NULL);
 }
 
-// Function to handle operations for a category
+// Updated handle_category function
 void handle_category(const char *category_path, const char *category_name, cart_shop *store_cart) {
     printf("PID %d create child for category %s\n", getpid(), category_name);
 
@@ -176,6 +178,11 @@ void handle_category(const char *category_path, const char *category_name, cart_
         } *thread_args = malloc(sizeof(*thread_args));
         thread_args->file_path = file_path;
         thread_args->store_cart = store_cart;
+
+        pthread_mutex_lock(&thread_count_lock);
+        total_product_threads++;
+//        printf("DEBUG: Total product threads created so far: %d\n", total_product_threads);
+        pthread_mutex_unlock(&thread_count_lock);
 
         if (pthread_create(&threads[thread_count], NULL, handle_product, thread_args) != 0) {
             perror("Failed to create thread");
@@ -327,12 +334,14 @@ int main() {
             }
         }
 
-        while (product_threads_done < num_stores * 256) {
+        while (product_threads_done < total_product_threads) {
             sleep(1);
         }
 
+//        printf("DEBUG: Creating value_thread...\n");
         pthread_create(&value_thread, NULL, select_best_cart, store_carts);
         pthread_join(value_thread, NULL);
+//        printf("DEBUG: value_thread has finished.\n");
 
         for (int i = 0; i < num_stores; i++) {
             wait(NULL);
