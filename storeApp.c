@@ -34,6 +34,9 @@ int shm_id; // Global shared memory identifier
 pthread_t value_thread;
 bool value_thread_done = false;
 
+int product_threads_done = 0; // Counter for product threads
+pthread_mutex_t thread_count_lock = PTHREAD_MUTEX_INITIALIZER;
+
 // Thread function to handle cart selection
 void *select_best_cart(void *args) {
     cart_shop *store_carts = args;
@@ -63,6 +66,7 @@ void *select_best_cart(void *args) {
 
     pthread_exit(NULL);
 }
+
 
 // Thread function to handle a product
 void *handle_product(void *args) {
@@ -137,13 +141,9 @@ void *handle_product(void *args) {
     fclose(file);
     free(thread_args);
 
-    pthread_mutex_lock(&cart_lock);
-    printf("DEBUG: Thread TID:%ld is waiting for value_thread...\n", syscall(SYS_gettid));
-    while (!value_thread_done) {
-        pthread_cond_wait(&value_cond, &cart_lock);
-    }
-    printf("DEBUG: Thread TID:%ld resumed execution.\n", syscall(SYS_gettid));
-    pthread_mutex_unlock(&cart_lock);
+    pthread_mutex_lock(&thread_count_lock);
+    product_threads_done++;
+    pthread_mutex_unlock(&thread_count_lock);
 
     pthread_exit(NULL);
 }
@@ -311,8 +311,6 @@ int main() {
         cart_shop store_carts[num_stores];
         memset(store_carts, 0, sizeof(store_carts));
 
-        pthread_create(&value_thread, NULL, select_best_cart, store_carts);
-
         for (int i = 0; i < num_stores; i++) {
             pid_t pid = fork();
 
@@ -329,11 +327,17 @@ int main() {
             }
         }
 
+        while (product_threads_done < num_stores * 256) {
+            sleep(1);
+        }
+
+        pthread_create(&value_thread, NULL, select_best_cart, store_carts);
+        pthread_join(value_thread, NULL);
+
         for (int i = 0; i < num_stores; i++) {
             wait(NULL);
         }
 
-        pthread_join(value_thread, NULL);
         printf("Process for userID completed.\n");
         exit(0);
     } else if (user_pid > 0) {
