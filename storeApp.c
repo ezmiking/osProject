@@ -11,6 +11,8 @@
 #include <sys/syscall.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+#include <errno.h>
+#include <stdarg.h>
 
 char items[256][256];
 int quantities[256];
@@ -42,11 +44,30 @@ const char *dataset_path = "./Dataset";
 const char *stores[] = {"Store1", "Store2", "Store3"};
 int num_stores = 3;
 
+//neveshtan .log
+pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
+pid_t global_user_pid;
+char global_user_name[256];
+
+static void write_to_log(const char *log_file_path, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    pthread_mutex_lock(&log_lock);
+    FILE *logf = fopen(log_file_path, "a");
+    if (logf) {
+        vfprintf(logf, format, args);
+        fclose(logf);
+    }
+    pthread_mutex_unlock(&log_lock);
+
+    va_end(args);
+}
+
 int update_entity_in_file(const char *filepath, int purchased_amount);
 int update_score_in_file(const char *filepath, float user_score);
 bool find_and_update_product_file(const char *store_path, const char *product_name, int purchased_amount);
 bool find_and_update_product_score(const char *store_path, const char *product_name, float user_score);
-
 
 int update_entity_in_file(const char *filepath, int purchased_amount) {
     FILE *f = fopen(filepath, "r");
@@ -134,9 +155,7 @@ int update_score_in_file(const char *filepath, float user_score) {
     }
 
     if (score_line_index == -1) {
-        // agar hichi peida nashod farz:0
         current_score = 0.0f;
-        // khate scoro ezaf mikonim
         score_line_index = line_count;
         line_count++;
         lines[score_line_index] = strdup("");
@@ -171,8 +190,6 @@ bool find_and_update_product_file(const char *store_path, const char *product_na
 
     struct dirent *entry;
     bool updated = false;
-
-    // estefade az stat
     struct stat st;
 
     while ((entry = readdir(dir)) != NULL && !updated) {
@@ -232,7 +249,6 @@ bool find_and_update_product_score(const char *store_path, const char *product_n
 
     struct dirent *entry;
     bool updated = false;
-
     struct stat st;
     while ((entry = readdir(dir)) != NULL && !updated) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
@@ -285,7 +301,6 @@ bool find_and_update_product_score(const char *store_path, const char *product_n
     return updated;
 }
 
-//nakhe value
 void *select_best_cart(void *args) {
     cart_shop *store_carts = (cart_shop *)args;
     float max_value = -1;
@@ -310,7 +325,6 @@ void *select_best_cart(void *args) {
     return (void*)(long)best_cart_index;
 }
 
-//nahke final khkh
 void *final_thread_func(void *args) {
     struct {
         cart_shop *store_carts;
@@ -333,7 +347,6 @@ void *final_thread_func(void *args) {
     char store_path[256];
     snprintf(store_path, sizeof(store_path), "%s/%s", dataset_path, best_store_name);
 
-    // kam kardanemojodie mahsoolat  benazmm
     for (int i = 0; i < best_cart->name_count; i++) {
         char *product_name = best_cart->name[i];
         int purchased_amount = 0;
@@ -359,7 +372,6 @@ void *final_thread_func(void *args) {
     pthread_exit(NULL);
 }
 
-//nakhe score dadan
 void *score_thread_func(void *args) {
     struct {
         cart_shop *store_carts;
@@ -381,14 +393,12 @@ void *score_thread_func(void *args) {
     char store_path[256];
     snprintf(store_path, sizeof(store_path), "%s/%s", dataset_path, best_store_name);
 
-    // gereftan score az karbar
     for (int i = 0; i < best_cart->name_count; i++) {
         char *product_name = best_cart->name[i];
         float user_score;
         printf("Please enter your score for product %s: ", product_name);
         scanf("%f", &user_score);
 
-        // آپدیت score در فایل
         printf("Score thread: Updating score for product %s by averaging with current score.\n", product_name);
         bool res = find_and_update_product_score(store_path, product_name, user_score);
         if (!res) {
@@ -402,19 +412,24 @@ void *score_thread_func(void *args) {
     pthread_exit(NULL);
 }
 
-//nakhe mahsool
+struct product_thread_args {
+    char *file_path;
+    cart_shop *store_cart;
+    char log_file_path[512];
+};
+
 void *handle_product(void *args) {
-    struct {
-        char *file_path;
-        cart_shop *store_cart;
-    } *thread_args = args;
+    struct product_thread_args *thread_args = args;
 
     char *path = thread_args->file_path;
     cart_shop *store_cart = thread_args->store_cart;
+    char log_file_path[512];
+    strcpy(log_file_path, thread_args->log_file_path);
 
     FILE *file = fopen(path, "r");
     if (file == NULL) {
         printf("PID %d TID:%ld - File %s not found\n", getpid(), syscall(SYS_gettid), path);
+        write_to_log(log_file_path, "PID %d TID:%ld - File %s not found\n", getpid(), (long)syscall(SYS_gettid), path);
         free(thread_args->file_path);
         free(thread_args);
         pthread_exit(NULL);
@@ -452,10 +467,19 @@ void *handle_product(void *args) {
                                     store_cart->check_in_out = 0;
                                     printf("Store PID %d doesn't have enough quantity for %s. Requested: %d, Available: %d\n",
                                            getpid(), temp_name, quantities[j], temp_entity);
+                                    write_to_log(log_file_path,
+                                                 "Store PID %d doesn't have enough quantity for %s. Requested: %d, Available: %d\n",
+                                                 getpid(), temp_name, quantities[j], temp_entity);
                                 }
                                 break;
                             }
                         }
+
+                        printf("PID %d TID:%ld found product: %s, Price: %.2f, Score: %.2f, Entity: %d\n",
+                               getpid(), syscall(SYS_gettid), temp_name, temp_price, temp_score, temp_entity);
+                        write_to_log(log_file_path,
+                                     "PID %d TID:%ld found product: %s, Price: %.2f, Score: %.2f, Entity: %d\n",
+                                     getpid(), (long)syscall(SYS_gettid), temp_name, temp_price, temp_score, temp_entity);
 
                         store_cart->name_count++;
                         pthread_mutex_unlock(&cart_lock);
@@ -477,8 +501,12 @@ void *handle_product(void *args) {
     pthread_exit(NULL);
 }
 
-// tabe categoori
 void handle_category(const char *category_path, cart_shop *store_cart) {
+    char cat_log_path[512];
+    snprintf(cat_log_path, sizeof(cat_log_path), "%s/%d_%s.log", category_path, global_user_pid, global_user_name);
+    FILE *cat_logf = fopen(cat_log_path, "w");
+    if (cat_logf) fclose(cat_logf);
+
     DIR *dir = opendir(category_path);
     if (dir == NULL) {
         perror("Failed to open directory");
@@ -497,12 +525,10 @@ void handle_category(const char *category_path, cart_shop *store_cart) {
         char *file_path = malloc(256);
         snprintf(file_path, 256, "%s/%s", category_path, entry->d_name);
 
-        struct {
-            char *file_path;
-            cart_shop *store_cart;
-        } *thread_args = malloc(sizeof(*thread_args));
+        struct product_thread_args *thread_args = malloc(sizeof(*thread_args));
         thread_args->file_path = file_path;
         thread_args->store_cart = store_cart;
+        strcpy(thread_args->log_file_path, cat_log_path);
 
         pthread_mutex_lock(&thread_count_lock);
         total_product_threads++;
@@ -515,6 +541,9 @@ void handle_category(const char *category_path, cart_shop *store_cart) {
             continue;
         }
 
+        pid_t tid = syscall(SYS_gettid);
+        write_to_log(cat_log_path, "PID %d TID:%d created for product file %s\n", getpid(), (int)tid, file_path);
+
         thread_count++;
     }
 
@@ -525,8 +554,15 @@ void handle_category(const char *category_path, cart_shop *store_cart) {
     closedir(dir);
 }
 
-// تابع فروشگاه
 void handle_store(const char *store_path, const char *store_name, const char *budget_input, cart_shop *store_cart) {
+    // create .log for each store
+    char store_log_path[512];
+    snprintf(store_log_path, sizeof(store_log_path), "%s/%d_%s.log", store_path, global_user_pid, global_user_name);
+    FILE *store_logf = fopen(store_log_path, "w");
+    if (store_logf) fclose(store_logf);
+
+    write_to_log(store_log_path, "PID %d create child for store %s\n", getpid(), store_name);
+
     memset(store_cart, 0, sizeof(cart_shop));
     store_cart->check_in_out = 1;
 
@@ -550,7 +586,8 @@ void handle_store(const char *store_path, const char *store_name, const char *bu
             handle_category(category_path, store_cart);
             exit(0);
         } else if (pid > 0) {
-            // ok
+            printf("PID %d create child for category %s PID:%d\n", getpid(), entry->d_name, pid);
+            write_to_log(store_log_path, "PID %d create child for category %s PID:%d\n", getpid(), entry->d_name, pid);
         } else {
             perror("Fork failed");
             exit(1);
@@ -558,6 +595,8 @@ void handle_store(const char *store_path, const char *store_name, const char *bu
     }
 
     while (wait(NULL) > 0);
+
+    closedir(dir);
 
     printf("\nSummary of cart for store %s:\n", store_name);
     for (int i = 0; i < store_cart->name_count; i++) {
@@ -573,15 +612,13 @@ void handle_store(const char *store_path, const char *store_name, const char *bu
     }
 
     printf("Check-in-out status: %d\n", store_cart->check_in_out);
-
-    closedir(dir);
 }
 
-// main**********************************************************************************
 int main() {
     printf("Username: ");
-    char user_name[256];
-    scanf("%s", user_name);
+    scanf("%s", global_user_name);
+
+    global_user_pid = getpid();
 
     printf("\nOrderList0:\n");
     num_items = 0;
@@ -603,7 +640,7 @@ int main() {
     fgets(budget_input, sizeof(budget_input), stdin);
     budget_input[strcspn(budget_input, "\n")] = '\0';
 
-    printf("\nUsername: %s\nOrderList0:\n", user_name);
+    printf("\nUsername: %s\nOrderList0:\n", global_user_name);
     for (int i = 0; i < num_items; i++) {
         printf("%s %d\n", items[i], quantities[i]);
     }
@@ -638,7 +675,8 @@ int main() {
             shmdt(store_carts);
             exit(0);
         } else if (pid > 0) {
-            // ok
+            printf("PID %d create child for store %s PID:%d\n", user_pid, stores[i], pid);
+            // creat .log
         } else {
             perror("Fork failed");
             exit(1);
@@ -647,7 +685,6 @@ int main() {
 
     while (wait(NULL) > 0);
 
-    // ایجاد value_thread
     pthread_t val_thread;
     void *best_cart_index_ptr;
     pthread_create(&val_thread, NULL, select_best_cart, shared_store_carts);
@@ -655,7 +692,6 @@ int main() {
 
     int best_cart_index = (int)(long)best_cart_index_ptr;
 
-    // eejade nakhe final
     struct {
         cart_shop *store_carts;
         int best_cart_index;
@@ -669,7 +705,6 @@ int main() {
     pthread_create(&final_thread, NULL, final_thread_func, final_args);
     pthread_join(final_thread, NULL);
 
-    // eejade nakhe score
     struct {
         cart_shop *store_carts;
         int best_cart_index;
@@ -681,7 +716,6 @@ int main() {
     pthread_create(&score_thread, NULL, score_thread_func, score_args);
     pthread_join(score_thread, NULL);
 
-    // chappp
     for (int i = 0; i < num_stores; i++) {
         printf("Final status of store %s: check_in_out = %d, value = %.2f\n",
                stores[i], shared_store_carts[i].check_in_out, shared_store_carts[i].value);
