@@ -10,6 +10,10 @@
 #include <sys/shm.h>
 #include <sys/syscall.h>
 #include <stdbool.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 
 char items[256][256];
 int quantities[256];
@@ -17,6 +21,8 @@ int num_items = 0;
 
 pthread_mutex_t cart_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t value_cond = PTHREAD_COND_INITIALIZER;
+
+pthread_rwlock_t file_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 
 typedef struct {
     float total_price;
@@ -39,6 +45,126 @@ bool value_thread_done = false;
 const char *dataset_path = "./Dataset";
 const char *stores[] = {"Store1", "Store2", "Store3"};
 int num_stores = 3;
+
+//---------------------------------------
+
+int update_entity_in_file(const char *filepath, int purchased_amount) {
+    FILE *f = fopen(filepath, "r");
+    if (!f) {
+        perror("Failed to open product file to update");
+        return -1;
+    }
+
+    char *lines[1024];
+    int line_count = 0;
+    char buffer[1024];
+
+    while (fgets(buffer, sizeof(buffer), f)) {
+        lines[line_count] = strdup(buffer);
+        line_count++;
+    }
+    fclose(f);
+
+    int entity_line_index = -1;
+    int current_entity = -1;
+    for (int i = 0; i < line_count; i++) {
+        int temp_ent;
+        if (sscanf(lines[i], " Entity: %d", &temp_ent) == 1) {
+            entity_line_index = i;
+            current_entity = temp_ent;
+            break;
+        }
+    }
+
+    if (entity_line_index == -1) {
+        for (int i = 0; i < line_count; i++) free(lines[i]);
+        return -1;
+    }
+
+    int new_entity = current_entity - purchased_amount;
+    if (new_entity < 0) new_entity = 0;
+
+    char new_entity_line[256];
+    snprintf(new_entity_line, sizeof(new_entity_line), " Entity: %d\n", new_entity);
+    free(lines[entity_line_index]);
+    lines[entity_line_index] = strdup(new_entity_line);
+
+    f = fopen(filepath, "w");
+    if (!f) {
+        perror("Failed to open product file to write updated data");
+        for (int i = 0; i < line_count; i++) free(lines[i]);
+        return -1;
+    }
+
+    for (int i = 0; i < line_count; i++) {
+        fputs(lines[i], f);
+        free(lines[i]);
+    }
+    fclose(f);
+
+    return 0;
+}
+
+bool find_and_update_product_file(const char *store_path, const char *product_name, int purchased_amount) {
+    DIR *dir = opendir(store_path);
+    if (!dir) return false;
+
+    struct dirent *entry;
+    bool updated = false;
+
+    while ((entry = readdir(dir)) != NULL && !updated) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        char path[512];
+        snprintf(path, sizeof(path), "%s/%s", store_path, entry->d_name);
+
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            DIR *cat_dir = opendir(path);
+            if (!cat_dir) continue;
+            struct dirent *file_entry;
+            while ((file_entry = readdir(cat_dir)) != NULL && !updated) {
+                if (strcmp(file_entry->d_name, ".") == 0 || strcmp(file_entry->d_name, "..") == 0)
+                    continue;
+                char file_path[512];
+                snprintf(file_path, sizeof(file_path), "%s/%s", path, file_entry->d_name);
+
+                FILE *temp_f = fopen(file_path, "r");
+                if (!temp_f) continue;
+
+                char line[256];
+                bool found_name = false;
+                while (fgets(line, sizeof(line), temp_f) != NULL) {
+                    char temp_name[256];
+                    if (sscanf(line, " Name: %255[^\n]", temp_name) == 1) {
+                        if (strcmp(temp_name, product_name) == 0) {
+                            found_name = true;
+                            break;
+                        }
+                    }
+                }
+                fclose(temp_f);
+
+                if (found_name) {
+                    pthread_rwlock_wrlock(&file_rwlock);
+                    int res = update_entity_in_file(file_path, purchased_amount);
+                    pthread_rwlock_unlock(&file_rwlock);
+
+                    if (res == 0) {
+                        updated = true;
+                    }
+                }
+            }
+            closedir(cat_dir);
+        }
+    }
+
+    closedir(dir);
+    return updated;
+}
+
+//---------------------------------------
 
 void *select_best_cart(void *args) {
     cart_shop *store_carts = (cart_shop *)args;
@@ -70,6 +196,53 @@ void *select_best_cart(void *args) {
     pthread_cond_broadcast(&value_cond);
     pthread_mutex_unlock(&cart_lock);
 
+    pthread_exit((void*)(long)best_cart_index);
+}
+
+void *final_thread_func(void *args) {
+    struct {
+        cart_shop *store_carts;
+        int best_cart_index;
+        char budget_input[256];
+    } *final_args = args;
+
+    cart_shop *store_carts = final_args->store_carts;
+    int best_cart_index = final_args->best_cart_index;
+
+    if (best_cart_index < 0) {
+        printf("No best cart to finalize.\n");
+        free(final_args);
+        pthread_exit(NULL);
+    }
+
+    cart_shop *best_cart = &store_carts[best_cart_index];
+    const char *best_store_name = stores[best_cart_index];
+
+    char store_path[256];
+    snprintf(store_path, sizeof(store_path), "%s/%s", dataset_path, best_store_name);
+
+    for (int i = 0; i < best_cart->name_count; i++) {
+        char *product_name = best_cart->name[i];
+        int purchased_amount = 0;
+        for (int j = 0; j < num_items; j++) {
+            if (strcmp(items[j], product_name) == 0) {
+                purchased_amount = quantities[j];
+                break;
+            }
+        }
+
+        if (purchased_amount > 0) {
+            printf("Final thread: Updating entity for product %s by %d\n", product_name, purchased_amount);
+            bool res = find_and_update_product_file(store_path, product_name, purchased_amount);
+            if (!res) {
+                printf("Warning: Could not update entity for product %s\n", product_name);
+            } else {
+                printf("Entity for product %s updated successfully.\n", product_name);
+            }
+        }
+    }
+
+    free(final_args);
     pthread_exit(NULL);
 }
 
@@ -121,7 +294,7 @@ void *handle_product(void *args) {
                                     store_cart->total_price += quantities[j] * temp_price;
                                 } else {
                                     store_cart->total_price += temp_entity * temp_price;
-                                    store_cart->check_in_out = 0; // موجودی ناکافی
+                                    store_cart->check_in_out = 0;
                                     printf("Store PID %d doesn't have enough quantity for %s. Requested: %d, Available: %d\n",
                                            getpid(), temp_name, quantities[j], temp_entity);
                                 }
@@ -253,7 +426,6 @@ void handle_store(const char *store_path, const char *store_name, const char *bu
     printf("Check-in-out status: %d\n", store_cart->check_in_out);
 }
 
-
 int main() {
     printf("Username: ");
     char user_name[256];
@@ -326,8 +498,24 @@ int main() {
     while (wait(NULL) > 0);
 
     pthread_t val_thread;
+    void *best_cart_index_ptr;
     pthread_create(&val_thread, NULL, select_best_cart, shared_store_carts);
-    pthread_join(val_thread, NULL);
+    pthread_join(val_thread, &best_cart_index_ptr);
+
+    int best_cart_index = (int)(long)best_cart_index_ptr;
+
+    struct {
+        cart_shop *store_carts;
+        int best_cart_index;
+        char budget_input[256];
+    } *final_args = malloc(sizeof(*final_args));
+    final_args->store_carts = shared_store_carts;
+    final_args->best_cart_index = best_cart_index;
+    strcpy(final_args->budget_input, budget_input);
+
+    pthread_t final_thread;
+    pthread_create(&final_thread, NULL, final_thread_func, final_args);
+    pthread_join(final_thread, NULL);
 
     for (int i = 0; i < num_stores; i++) {
         printf("Final status of store %s: check_in_out = %d, value = %.2f\n", stores[i], shared_store_carts[i].check_in_out, shared_store_carts[i].value);
@@ -336,6 +524,7 @@ int main() {
     if (shmdt(shared_store_carts) == -1) {
         perror("Failed to detach shared memory in main");
     }
+
     if (shmctl(shm_id, IPC_RMID, NULL) == -1) {
         perror("Failed to remove shared memory");
     }
