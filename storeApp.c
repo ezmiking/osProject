@@ -18,6 +18,7 @@ int num_items = 0;
 
 // Bag shop for each store
 pthread_mutex_t cart_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t value_cond = PTHREAD_COND_INITIALIZER;
 typedef struct {
     float total_price;
     int check_in_out;
@@ -32,7 +33,6 @@ typedef struct {
 int shm_id; // Global shared memory identifier
 pthread_t value_thread;
 bool value_thread_done = false;
-pthread_cond_t value_cond = PTHREAD_COND_INITIALIZER;
 
 // Thread function to handle cart selection
 void *select_best_cart(void *args) {
@@ -40,6 +40,7 @@ void *select_best_cart(void *args) {
     float max_value = -1;
     int best_cart_index = -1;
 
+    printf("DEBUG: Starting value_thread...\n");
     pthread_mutex_lock(&cart_lock);
     for (int i = 0; i < num_items; i++) {
         if (store_carts[i].check_in_out == 1 && store_carts[i].value > max_value) {
@@ -54,9 +55,10 @@ void *select_best_cart(void *args) {
         }
     }
 
-    printf("Best cart selected with value: %.2f\n", max_value);
+    printf("DEBUG: Best cart selected with value: %.2f\n", max_value);
     value_thread_done = true;
     pthread_cond_broadcast(&value_cond);
+    printf("DEBUG: Sent signal to all waiting threads.\n");
     pthread_mutex_unlock(&cart_lock);
 
     pthread_exit(NULL);
@@ -136,9 +138,11 @@ void *handle_product(void *args) {
     free(thread_args);
 
     pthread_mutex_lock(&cart_lock);
+    printf("DEBUG: Thread TID:%ld is waiting for value_thread...\n", syscall(SYS_gettid));
     while (!value_thread_done) {
         pthread_cond_wait(&value_cond, &cart_lock);
     }
+    printf("DEBUG: Thread TID:%ld resumed execution.\n", syscall(SYS_gettid));
     pthread_mutex_unlock(&cart_lock);
 
     pthread_exit(NULL);
